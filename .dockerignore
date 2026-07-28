@@ -1,40 +1,11 @@
-# Git files
 .git
 .github
-.gitignore
-
-# DVC cache
-.dvc/cache
-
-# Python environments
-venv
 .venv
-
-# Python cache
+venv
 __pycache__
-*.pyc
-*.pyo
-
-# Local environment variables
-.env
-
-# MLflow experiment data
+.pytest_cache
 mlruns
-
-# Development files
-notebooks
-monitoring
-airflow
-.vscode
-.ipynb_checkpoints
-
-# Dataset and processed data are not required by the API
 data
-
-# Documentation
-README.md
-
-# Docker files not needed inside the image
-deployment.yaml
-service.yaml
-dvc.yaml
+reports
+notebooks
+*.pptx

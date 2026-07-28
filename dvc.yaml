@@ -1,0 +1,10 @@
+stages:
+  train:
+    cmd: python train.py
+    deps:
+      - data/student_attendance.csv
+      - preprocess.py
+      - train.py
+    outs:
+      - model/model.pkl
+      - reports/model_comparison.json

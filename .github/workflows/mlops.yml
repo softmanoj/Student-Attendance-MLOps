@@ -1,103 +1,52 @@
-name: Student Attendance MLOps Pipeline
+name: Attendance MLOps CI
 
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
   pull_request:
-    branches:
-      - main
-
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-env:
-  DOCKER_IMAGE: softmanoj2/attendance-api
+    branches: [main]
 
 jobs:
-  build-test-and-push:
-    name: Train, Test and Publish
+  train-test-build:
     runs-on: ubuntu-latest
-
     steps:
-      # ------------------------------------------------
-      # 1. Checkout source code
-      # ------------------------------------------------
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # ------------------------------------------------
-      # 2. Configure Python
-      # ------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      # ------------------------------------------------
-      # 3. Install dependencies
-      # ------------------------------------------------
       - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Pull DVC dataset if remote is configured
+        run: dvc pull || true
+
+      - name: Reproduce synthetic dataset when DVC remote is unavailable
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-api.txt
-          pip install mlflow dvc pytest httpx
+          if [ ! -f data/student_attendance.csv ]; then
+            python tools/generate_dataset.py
+          fi
 
-      # ------------------------------------------------
-      # 4. Download DVC dataset
-      # ------------------------------------------------
-      - name: Pull dataset using DVC
-        run: dvc pull
-
-      # ------------------------------------------------
-      # 5. Preprocess dataset
-      # ------------------------------------------------
-      - name: Preprocess dataset
-        run: python preprocess.py
-
-      # ------------------------------------------------
-      # 6. Train model
-      # ------------------------------------------------
-      - name: Train Random Forest model
+      - name: Train and compare models
         run: python train.py
 
-      # ------------------------------------------------
-      # 7. Run automated tests
-      # ------------------------------------------------
-      - name: Run API tests
-        run: python -m pytest -v
+      - name: Run tests
+        run: pytest -q
 
-      # ------------------------------------------------
-      # 8. Set up Docker Buildx
-      # ------------------------------------------------
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ------------------------------------------------
-      # 9. Login to Docker Hub
-      # Only runs for pushes to main, not pull requests
-      # ------------------------------------------------
-      - name: Login to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # ------------------------------------------------
-      # 10. Build and optionally push Docker image
-      # ------------------------------------------------
       - name: Build and push Docker image
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: |
-            ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/attendance-api:latest

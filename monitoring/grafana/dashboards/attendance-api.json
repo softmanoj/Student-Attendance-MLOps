@@ -1,0 +1,57 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Prediction Requests",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(attendance_prediction_requests_total)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Predictions per Minute",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(attendance_prediction_requests_total[1m])) * 60", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "P95 Prediction Latency",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(attendance_prediction_latency_seconds_bucket[5m])) by (le))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 0}
+    },
+    {
+      "type": "stat",
+      "title": "Prediction Errors",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(attendance_prediction_errors_total)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Container CPU Usage",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(container_cpu_usage_seconds_total{name=~\".*attendance-api.*\"}[5m]))", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Container Memory Usage",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(container_memory_working_set_bytes{name=~\".*attendance-api.*\"})", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 8}
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["mlops", "attendance"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "browser",
+  "title": "Student Attendance MLOps",
+  "uid": "attendance-mlops",
+  "version": 1
+}

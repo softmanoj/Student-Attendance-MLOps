@@ -1,0 +1,20 @@
+{
+  "baseline": {
+    "mae": 5.042308250000001,
+    "rmse": 6.289873072091759,
+    "r2": 0.5902205271289251
+  },
+  "proposed": {
+    "mae": 2.7566701967236726,
+    "rmse": 3.467658656082322,
+    "r2": 0.8754513233946228
+  },
+  "best_parameters": {
+    "max_depth": 10,
+    "max_features": 0.8,
+    "min_samples_leaf": 1,
+    "min_samples_split": 5,
+    "n_estimators": 250
+  },
+  "rmse_improvement_percent": 44.87
+}

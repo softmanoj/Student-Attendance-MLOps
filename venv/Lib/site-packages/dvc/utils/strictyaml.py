@@ -20,7 +20,6 @@ from dvc.utils.serialize import (
     parse_yaml,
     parse_yaml_for_update,
 )
-from dvc_objects.fs.local import LocalFileSystem
 
 if TYPE_CHECKING:
     from rich.syntax import Syntax
@@ -35,24 +34,15 @@ _T = TypeVar("_T")
 merge_conflict_marker = re.compile("^([<=>]{7}) .*$", re.MULTILINE)
 
 
-def make_relpath(fs_path: str, fs: "Optional[FileSystem]" = None) -> str:
-    from os import curdir, pardir, sep
+def make_relpath(path: str) -> str:
+    import os
 
     from dvc.utils import relpath
 
-    if not fs_path:
-        return fs_path
-
-    if fs and not isinstance(fs, LocalFileSystem):
-        rel = fs.relpath(fs_path).replace(fs.sep, sep)
-    else:
-        rel = relpath(fs_path)
-
-    if rel.startswith(sep):
-        # if it is an absolute path, return as it is.
-        # This can happen on Windows when we are on a different drive.
-        return rel
-    prefix = curdir + sep if not rel.startswith(pardir) else ""
+    rel = relpath(path)
+    prefix = ""
+    if not rel.startswith(".."):
+        prefix = "./" if os.name == "posix" else ".\\"
     return prefix + rel
 
 
@@ -87,14 +77,14 @@ class YAMLSyntaxError(PrettyDvcException, YAMLFileCorruptedError):
         exc: Exception,
         rev: Optional[str] = None,
     ) -> None:
+        self.path: str = path
         self.yaml_text: str = yaml_text
         self.exc: Exception = exc
 
         merge_conflicts = merge_conflict_marker.search(self.yaml_text)
         self.hint = " (possible merge conflicts)" if merge_conflicts else ""
         self.rev: Optional[str] = rev
-        super().__init__(path)
-        self.relpath: str = path
+        super().__init__(self.path)
 
     def __pretty_exc__(self, **kwargs: Any) -> None:  # noqa: C901
         from ruamel.yaml.error import MarkedYAMLError
@@ -144,8 +134,9 @@ class YAMLSyntaxError(PrettyDvcException, YAMLFileCorruptedError):
             # if there are no other outputs
             lines.insert(0, "")
 
+        rel = make_relpath(self.path)
         rev_msg = f" in revision '{self.rev[:7]}'" if self.rev else ""
-        msg_fmt = f"'{self.relpath}' is invalid{self.hint}{rev_msg}."
+        msg_fmt = f"'{rel}' is invalid{self.hint}{rev_msg}."
         lines.insert(0, _prepare_message(msg_fmt))
         for line in lines:
             ui.error_write(line, styled=True)
@@ -207,9 +198,10 @@ class YAMLValidationError(PrettyDvcException):
         self.text = text or ""
         self.exc = exc
 
+        rel = make_relpath(path) if path else ""
         self.path = path or ""
 
-        message = f"'{self.path}' validation failed"
+        message = f"'{rel}' validation failed"
         message += f" in revision '{rev[:7]}'" if rev else ""
         if len(self.exc.errors) > 1:
             message += f": {len(self.exc.errors)} errors"
@@ -296,12 +288,10 @@ def load(
         raise EncodingError(path, encoding) from exc
     except YAMLFileCorruptedError as exc:
         cause = exc.__cause__
-        relpath = make_relpath(path, fs)
-        raise YAMLSyntaxError(relpath, text, exc, rev=rev) from cause
+        raise YAMLSyntaxError(path, text, exc, rev=rev) from cause
 
     if schema:
-        relpath = make_relpath(path, fs)
         # not returning validated data, as it may remove
         # details from CommentedMap that we get from roundtrip parser
-        validate(data, schema, text=text, path=relpath, rev=rev)
+        validate(data, schema, text=text, path=path, rev=rev)
     return data, text

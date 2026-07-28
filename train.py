@@ -1,147 +1,96 @@
+import json
 from pathlib import Path
 
 import joblib
 import mlflow
 import mlflow.sklearn
 import numpy as np
-import pandas as pd
-
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_squared_error,
-    r2_score
-)
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import GridSearchCV
+
+from preprocess import BASELINE_FEATURES, PROPOSED_FEATURES, prepare_data
 
 
-# --------------------------------------------------
-# File locations
-# --------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
-
-TRAIN_FILE = BASE_DIR / "data" / "processed" / "train.csv"
-TEST_FILE = BASE_DIR / "data" / "processed" / "test.csv"
-
-MODEL_DIR = BASE_DIR / "model"
-MODEL_FILE = MODEL_DIR / "model.pkl"
-
-TARGET_COLUMN = "Attendance"
+MODEL_DIR = Path("model")
+REPORT_DIR = Path("reports")
 
 
-# --------------------------------------------------
-# Model configuration
-# --------------------------------------------------
-MODEL_NAME = "Student Attendance Random Forest"
-NUMBER_OF_TREES = 100
-RANDOM_STATE = 42
+def metrics(model, X_test, y_test):
+    prediction = model.predict(X_test)
+    return {
+        "mae": float(mean_absolute_error(y_test, prediction)),
+        "rmse": float(np.sqrt(mean_squared_error(y_test, prediction))),
+        "r2": float(r2_score(y_test, prediction)),
+    }
 
 
-def train_model():
+def log_run(name, model, feature_names, scores):
+    with mlflow.start_run(run_name=name):
+        mlflow.log_param("model_name", "RandomForestRegressor")
+        mlflow.log_param("feature_count", len(feature_names))
+        mlflow.log_param("features", ",".join(feature_names))
+        mlflow.log_param("random_state", 42)
+        for key, value in model.get_params().items():
+            if key in {
+                "n_estimators",
+                "max_depth",
+                "min_samples_split",
+                "min_samples_leaf",
+                "max_features",
+            }:
+                mlflow.log_param(key, value)
+        mlflow.log_metrics(scores)
+        mlflow.sklearn.log_model(model, artifact_path="model")
 
-    # 1. Check processed datasets
-    if not TRAIN_FILE.exists() or not TEST_FILE.exists():
-        raise FileNotFoundError(
-            "Processed datasets were not found. "
-            "Run 'python preprocess.py' first."
-        )
 
-    # 2. Read processed datasets
-    print("Reading processed datasets...")
+def main():
+    X_train, X_test, y_train, y_test = prepare_data()
+    MODEL_DIR.mkdir(exist_ok=True)
+    REPORT_DIR.mkdir(exist_ok=True)
+    mlflow.set_experiment("student-attendance-comparison")
 
-    train_data = pd.read_csv(TRAIN_FILE)
-    test_data = pd.read_csv(TEST_FILE)
+    baseline = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    baseline.fit(X_train[BASELINE_FEATURES], y_train)
+    baseline_scores = metrics(baseline, X_test[BASELINE_FEATURES], y_test)
+    log_run("ieee-inspired-baseline", baseline, BASELINE_FEATURES, baseline_scores)
+    joblib.dump(baseline, MODEL_DIR / "baseline_model.pkl")
 
-    # 3. Check target column
-    if TARGET_COLUMN not in train_data.columns:
-        raise ValueError(
-            f"Target column '{TARGET_COLUMN}' is missing from train.csv."
-        )
+    parameter_grid = {
+        "n_estimators": [150, 250],
+        "max_depth": [10, 18, None],
+        "min_samples_split": [2, 5],
+        "min_samples_leaf": [1, 2],
+        "max_features": ["sqrt", 0.8],
+    }
+    search = GridSearchCV(
+        RandomForestRegressor(random_state=42, n_jobs=-1),
+        parameter_grid,
+        cv=5,
+        scoring="neg_root_mean_squared_error",
+        n_jobs=-1,
+    )
+    search.fit(X_train[PROPOSED_FEATURES], y_train)
+    proposed = search.best_estimator_
+    proposed_scores = metrics(proposed, X_test[PROPOSED_FEATURES], y_test)
+    log_run("proposed-feature-enhanced", proposed, PROPOSED_FEATURES, proposed_scores)
 
-    if TARGET_COLUMN not in test_data.columns:
-        raise ValueError(
-            f"Target column '{TARGET_COLUMN}' is missing from test.csv."
-        )
-
-    # 4. Separate features and target
-    X_train = train_data.drop(columns=[TARGET_COLUMN])
-    y_train = train_data[TARGET_COLUMN]
-
-    X_test = test_data.drop(columns=[TARGET_COLUMN])
-    y_test = test_data[TARGET_COLUMN]
-
-    print(f"Training records: {len(X_train)}")
-    print(f"Testing records: {len(X_test)}")
-    print(f"Features: {list(X_train.columns)}")
-
-    # 5. Create or select MLflow experiment
-    mlflow.set_experiment("Student Attendance Prediction")
-
-    # Every execution inside this block becomes one MLflow run
-    with mlflow.start_run(
-        run_name=f"RandomForest_{NUMBER_OF_TREES}_Trees"
-    ) as run:
-
-        # 6. Create Random Forest model
-        model = RandomForestRegressor(
-            n_estimators=NUMBER_OF_TREES,
-            random_state=RANDOM_STATE
-        )
-
-        # 7. Train model
-        print("\nTraining Random Forest Regressor...")
-        model.fit(X_train, y_train)
-
-        # 8. Generate predictions
-        predictions = model.predict(X_test)
-
-        # 9. Evaluate model
-        mae = mean_absolute_error(y_test, predictions)
-        rmse = np.sqrt(
-            mean_squared_error(y_test, predictions)
-        )
-        r2 = r2_score(y_test, predictions)
-
-        print("\nModel Evaluation")
-        print("----------------")
-        print(f"MAE      : {mae:.4f}")
-        print(f"RMSE     : {rmse:.4f}")
-        print(f"R² Score : {r2:.4f}")
-
-        # 10. Log model information and parameters
-        mlflow.log_params({
-            "model_name": MODEL_NAME,
-            "model_type": "RandomForestRegressor",
-            "number_of_trees": NUMBER_OF_TREES,
-            "random_state": RANDOM_STATE,
-            "training_records": len(X_train),
-            "testing_records": len(X_test)
-        })
-
-        # 11. Log evaluation metrics
-        mlflow.log_metrics({
-            "MAE": mae,
-            "RMSE": rmse,
-            "R2_Score": r2
-        })
-
-        # 12. Log the trained model in MLflow
-        input_example = X_train.head(3)
-
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            name="attendance_model",
-            input_example=input_example,
-            serialization_format="cloudpickle"
-        )
-
-        # 13. Save model.pkl locally
-        MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, MODEL_FILE)
-
-        print(f"\nModel saved at: {MODEL_FILE}")
-        print(f"MLflow Run ID: {run.info.run_id}")
-        print("Experiment stored successfully in MLflow.")
+    joblib.dump(proposed, MODEL_DIR / "model.pkl")
+    comparison = {
+        "baseline": baseline_scores,
+        "proposed": proposed_scores,
+        "best_parameters": search.best_params_,
+        "rmse_improvement_percent": round(
+            100 * (baseline_scores["rmse"] - proposed_scores["rmse"])
+            / baseline_scores["rmse"],
+            2,
+        ),
+    }
+    (REPORT_DIR / "model_comparison.json").write_text(
+        json.dumps(comparison, indent=2), encoding="utf-8"
+    )
+    print(json.dumps(comparison, indent=2))
 
 
 if __name__ == "__main__":
-    train_model()
+    main()

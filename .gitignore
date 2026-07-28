@@ -1,0 +1,30 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables and secrets
+.env
+
+# MLflow local experiment data
+mlruns/
+
+# Generated model files
+model/*.pkl
+
+# Processed datasets
+data/processed/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VS Code settings
+.vscode/
+
+# Operating-system files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+outs:
+- md5: 4394518f2ea21c2c5329829f6643ad17
+  size: 32606
+  hash: md5
+  path: student_attendance.csv

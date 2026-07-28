@@ -1,9 +1,17 @@
 from pathlib import Path
+from time import perf_counter
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Histogram,
+    generate_latest
+)
 
 
 # --------------------------------------------------
@@ -19,7 +27,7 @@ MODEL_FILE = BASE_DIR / "model" / "model.pkl"
 app = FastAPI(
     title="Student Attendance Prediction API",
     description=(
-        "A Machine Learning API that predicts student attendance "
+        "Machine Learning API for predicting student attendance "
         "using a Random Forest Regressor."
     ),
     version="1.0.0"
@@ -27,7 +35,33 @@ app = FastAPI(
 
 
 # --------------------------------------------------
-# Load trained model
+# Prometheus metrics
+# --------------------------------------------------
+
+# Total number of API requests
+API_REQUESTS = Counter(
+    "api_requests_total",
+    "Total number of API requests",
+    ["method", "endpoint", "status_code"]
+)
+
+# API response-time distribution
+API_RESPONSE_TIME = Histogram(
+    "api_response_time_seconds",
+    "API response time in seconds",
+    ["method", "endpoint"]
+)
+
+# Total number of prediction requests
+PREDICTION_REQUESTS = Counter(
+    "prediction_requests_total",
+    "Total number of prediction requests",
+    ["status_code"]
+)
+
+
+# --------------------------------------------------
+# Load model
 # --------------------------------------------------
 if not MODEL_FILE.exists():
     raise FileNotFoundError(
@@ -39,39 +73,89 @@ model = joblib.load(MODEL_FILE)
 
 
 # --------------------------------------------------
+# Request monitoring middleware
+# --------------------------------------------------
+@app.middleware("http")
+async def monitor_requests(request: Request, call_next):
+    start_time = perf_counter()
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+
+    except Exception:
+        status_code = 500
+
+        # Record failed requests before re-raising the error
+        if request.url.path != "/metrics":
+            API_REQUESTS.labels(
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=str(status_code)
+            ).inc()
+
+            API_RESPONSE_TIME.labels(
+                method=request.method,
+                endpoint=request.url.path
+            ).observe(perf_counter() - start_time)
+
+            if request.url.path == "/predict":
+                PREDICTION_REQUESTS.labels(
+                    status_code=str(status_code)
+                ).inc()
+
+        raise
+
+    # Do not count Prometheus scraping as an application request
+    if request.url.path != "/metrics":
+        API_REQUESTS.labels(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=str(status_code)
+        ).inc()
+
+        API_RESPONSE_TIME.labels(
+            method=request.method,
+            endpoint=request.url.path
+        ).observe(perf_counter() - start_time)
+
+        if request.url.path == "/predict":
+            PREDICTION_REQUESTS.labels(
+                status_code=str(status_code)
+            ).inc()
+
+    return response
+
+
+# --------------------------------------------------
 # Request schema
 # --------------------------------------------------
 class AttendanceInput(BaseModel):
     previous_attendance: float = Field(
         ...,
         ge=0,
-        le=100,
-        description="Previous attendance percentage"
+        le=100
     )
 
     timetable: int = Field(
         ...,
-        ge=1,
-        description="Number of timetable classes"
+        ge=1
     )
 
     semester: int = Field(
         ...,
         ge=1,
-        le=8,
-        description="Current semester"
+        le=8
     )
 
     holidays: int = Field(
         ...,
-        ge=0,
-        description="Number of holidays"
+        ge=0
     )
 
     internal_exams: int = Field(
         ...,
-        ge=0,
-        description="Number of internal examinations"
+        ge=0
     )
 
 
@@ -91,7 +175,6 @@ def home():
 @app.post("/predict")
 def predict_attendance(data: AttendanceInput):
     try:
-        # The column names and order must match the training dataset
         input_data = pd.DataFrame([
             {
                 "Previous_Attendance": data.previous_attendance,
@@ -103,8 +186,6 @@ def predict_attendance(data: AttendanceInput):
         ])
 
         prediction = model.predict(input_data)[0]
-
-        # Keep attendance within valid percentage limits
         prediction = max(0, min(100, float(prediction)))
 
         return {
@@ -116,3 +197,14 @@ def predict_attendance(data: AttendanceInput):
             status_code=500,
             detail=f"Prediction failed: {str(error)}"
         ) from error
+
+
+# --------------------------------------------------
+# Prometheus metrics endpoint
+# --------------------------------------------------
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )

@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY app.py preprocess.py ./
 COPY model/model.pkl model/model.pkl
+COPY reports/model_comparison.json reports/model_comparison.json
 
 EXPOSE 8000
 
